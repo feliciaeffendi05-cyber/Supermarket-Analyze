@@ -1,0 +1,343 @@
+---
+title: "Supermarket Sales Dashboard"
+subtitle: "How can a supermarket increase sales and improve staff scheduling? "
+format:
+  dashboard:
+    theme: cosmo
+    orientation: rows
+    scrolling: false
+    embed-resources: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+library(tidyverse)
+library(lubridate)
+library(plotly)
+library(htmltools)
+
+dashboard_css <- r"---(
+:root { --bg:#EEF1F5; --card:#FFFFFF; --card2:#F7F9FB; --line:#DDE3EA; --ink:#1E2A3A; --muted:#5F6B7A;
+        --navy:#1E2A3A; --gold:#C8963E; }
+body, .navbar, .card, .value-box { font-family:"Public Sans","Segoe UI",Arial,sans-serif; color:var(--ink); }
+body, .quarto-dashboard-content, .page-layout-custom { background:var(--bg) !important; }
+
+/* Title bar */
+.navbar { background:var(--navy) !important; border-bottom:3px solid var(--gold); box-shadow:none; }
+.navbar, .navbar .navbar-title, .navbar .navbar-subtitle { color:#fff !important; }
+.navbar .navbar-title { font-weight:800; }
+.navbar .navbar-subtitle { color:#C9D2DC !important; }
+
+/* Cards */
+.card:not(.bslib-value-box) { background:var(--card) !important; border:1px solid var(--line) !important; }
+.card { border-radius:12px; box-shadow:0 1px 2px rgba(30,42,58,.06); }
+.card-header { background:transparent !important; border-bottom:1px solid var(--line); color:var(--ink);
+               font-weight:700; font-size:.92rem; padding:.55rem .9rem; }
+.card-body { background:transparent !important; color:var(--ink); }
+
+/* Key number strip (custom, so it never flips layout on small screens) */
+.card:has(.kpi-strip) { background:transparent !important; border:0 !important; box-shadow:none !important; }
+.kpi-strip { display:grid !important; grid-template-columns:repeat(4, minmax(0,1fr)); gap:1rem; height:100%; width:100%; }
+.kpi-strip .kpi { border-radius:12px; color:#fff; display:flex !important; flex-direction:row !important;
+       align-items:center !important; justify-content:flex-start !important; text-align:left; gap:.9rem;
+       padding:.4rem 1.1rem; min-width:0; overflow:hidden; }
+.kpi-strip .kpi > div { display:block !important; min-width:0; }
+.kpi .bi { font-size:clamp(1.2rem, 2vw, 1.9rem); opacity:.5; flex:0 0 auto; }
+.kpi .kl { font-size:clamp(.7rem, .9vw, .8rem); opacity:.8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.kpi .kv { font-size:clamp(1.1rem, 1.9vw, 1.75rem); font-weight:800; letter-spacing:-.02em;
+           font-variant-numeric:tabular-nums; line-height:1.15; white-space:nowrap; }
+
+/* Insight cards under each chart */
+.card .insight-card { height:100%; width:100%; display:flex !important; flex-direction:column !important;
+                      gap:.5rem; text-align:left !important; align-items:stretch !important; padding:.75rem .9rem; }
+.card .insight-card .ic-head { display:flex !important; flex-direction:row !important;
+                               align-items:center !important; justify-content:flex-start !important; gap:.7rem; }
+.card .insight-card .ic-head > div { display:block !important; }
+.card .insight-card .ic-head > .ic-icon { display:grid !important; place-items:center; flex:0 0 2.3rem !important;
+                                          width:2.3rem !important; max-width:2.3rem; height:2.3rem; border-radius:10px;
+                                          background:var(--soft); color:var(--accent); font-size:1.15rem;
+                                          border:1px solid var(--accent); }
+.ic-title { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:clamp(.88rem, 1.1vw, 1.02rem); font-weight:800; line-height:1.15; color:var(--ink); }
+.ic-sub { font-size:.76rem; color:var(--muted); margin-top:.1rem; }
+/* Branch tiles */
+.card .insight-card .ic-pills { display:grid !important; grid-template-columns:repeat(3, minmax(0,1fr)); gap:.45rem; }
+.card .insight-card .pill { display:block !important; min-width:0; border:1px solid var(--line); border-radius:8px;
+        padding:.3rem .55rem; background:var(--card2); border-left:4px solid var(--b); line-height:1.2;
+        transition:transform .15s, box-shadow .15s; }
+.pill:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(30,42,58,.12); }
+.pill .pl, .pill .pv { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pill .pl { font-size:.7rem; color:var(--muted); font-weight:600; }
+.pill .pv { font-size:clamp(.8rem, 1vw, .95rem); font-weight:800; color:var(--ink); }
+.card .insight-card .pill.hi { background:var(--soft); border-color:var(--accent); border-left-color:var(--b); }
+.pill.hi .pv { color:var(--accent); }
+
+.card .insight-card .ic-action { margin-top:0; display:flex !important; flex-direction:row !important;
+             justify-content:flex-start !important; align-items:center !important; gap:.5rem; font-size:clamp(.72rem, .9vw, .82rem); line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+             background:var(--soft); color:var(--ink); border-radius:8px; padding:.35rem .6rem; }
+.ic-action .bi, .ic-action b { color:var(--accent); }
+.t1 { --accent:#3F7356; --soft:#EAF2EC; }
+.t2 { --accent:#2F6690; --soft:#E7EEF5; }
+.t3 { --accent:#94661C; --soft:#F7EFDF; }
+
+/* Chart buttons */
+.updatemenu-item-rect { fill:#EEF1F5 !important; stroke:#DDE3EA !important; }
+.updatemenu-item-text { fill:var(--ink) !important; }
+.updatemenu-item-rect[style*="244, 250, 255"] { fill:#C9D6E3 !important; stroke:#2F6690 !important; }
+
+/* Every card part keeps its natural height: nothing overlaps */
+.card .insight-card { overflow:hidden; }
+.card .insight-card > * { flex:0 0 auto; }
+.card .insight-card { justify-content:space-evenly !important; }
+.card .insight-card .ic-head > div:last-child { min-width:0; }
+
+/* Short windows (laptops with 125-150% Windows scaling, RStudio Viewer):
+   keep a minimum page height and let the page scroll a little instead of squashing */
+html { overflow-y:auto !important; }
+body.dashboard-fill { min-height:660px !important; }
+
+@media (max-height: 780px) {
+  .ic-sub { display:none; }
+  .card .insight-card { gap:.4rem; padding:.55rem .75rem; justify-content:center; }
+  .card .insight-card .ic-head > .ic-icon { width:1.9rem !important; height:1.9rem; flex-basis:1.9rem !important; font-size:.95rem; }
+  .card .insight-card .pill { padding:.2rem .45rem; }
+  .card .insight-card .ic-action { padding:.25rem .5rem; margin-top:0; }
+}
+)---"
+
+# One colour per branch: steel blue, muted gold, sage
+branch_colours <- c("A" = "#2F6690", "B" = "#C8963E", "C" = "#5B8C6E")
+font_family <- "Public Sans, Segoe UI, Arial, sans-serif"
+fmt <- function(x) scales::comma(x, accuracy = 1)
+hour_label <- function(h) ifelse(h == 12, "12pm", ifelse(h > 12, paste0(h - 12, "pm"), paste0(h, "am")))
+
+# Shared look for every chart
+style_plot <- function(p, ...) {
+  p %>%
+    layout(font = list(family = font_family, size = 12, color = "#1E2A3A"),
+           paper_bgcolor = "rgba(0,0,0,0)", plot_bgcolor = "rgba(0,0,0,0)",
+           margin = list(l = 5, r = 5, t = 40, b = 5),
+           hoverlabel = list(bgcolor = "#FFFFFF", bordercolor = "#1E2A3A",
+                             font = list(family = font_family, color = "#1E2A3A")), ...) %>%
+    config(displayModeBar = FALSE)
+}
+
+# Clickable buttons above a chart
+button_bar <- function(buttons) {
+  list(list(type = "buttons", direction = "right", x = 0, y = 1.02,
+            xanchor = "left", yanchor = "bottom", showactive = TRUE,
+            bgcolor = "#EEF1F5", bordercolor = "#DDE3EA", pad = list(r = 4, t = 2, b = 2),
+            font = list(size = 11, family = font_family, color = "#1E2A3A"), buttons = buttons))
+}
+
+# ---- Data ----
+sales <- read_csv("supermarket_sales - Sheet1.csv") %>%
+  mutate(Date    = mdy(Date),
+         Weekday = wday(Date, label = TRUE, week_start = 1),
+         Hour    = as.integer(substr(as.character(Time), 1, 2)),
+         Label   = paste(Branch, "-", City))
+
+branch_summary <- sales %>%
+  group_by(Branch, City, Label) %>%
+  summarise(Revenue = sum(Total), Sales = n(), Avg_Spend = mean(Total),
+            Rating = mean(Rating), .groups = "drop")
+
+hourly <- sales %>% group_by(Branch, Label, Hour) %>%
+  summarise(Revenue = sum(Total), .groups = "drop")
+
+period_hours <- c("Morning" = 3, "Midday" = 3, "Afternoon" = 3, "Evening" = 2)
+days_per_weekday <- tibble(Date = seq(min(sales$Date), max(sales$Date), by = "day")) %>%
+  count(Weekday = wday(Date, label = TRUE, week_start = 1), name = "n_days")
+
+heatmap_data <- sales %>%
+  mutate(Period = cut(Hour, breaks = c(9, 12, 15, 18, 21), labels = names(period_hours))) %>%
+  group_by(Branch, Label, Weekday, Period) %>%
+  summarise(Revenue = sum(Total), .groups = "drop") %>%
+  left_join(days_per_weekday, by = "Weekday") %>%
+  mutate(Per_Hour = round(Revenue / (n_days * period_hours[as.character(Period)])))
+
+quietest <- heatmap_data %>% group_by(Branch) %>% slice_min(Per_Hour, n = 1) %>% ungroup() %>%
+  mutate(When = paste(Weekday, tolower(Period)))
+
+# ---- Numbers used in the text ----
+best <- branch_summary %>% slice_max(Revenue)
+gap  <- round((max(branch_summary$Revenue) - min(branch_summary$Revenue)) / min(branch_summary$Revenue) * 100, 1)
+peak <- sales %>% count(Hour, wt = Total) %>% arrange(desc(n))
+q    <- function(b) quietest$When[quietest$Branch == b]
+branches <- branch_summary$Label
+
+# ---- Insight card builder (used under each chart) ----
+library(htmltools)
+branch_hex <- c(A = "#2F6690", B = "#C8963E", C = "#5B8C6E")
+insight_card <- function(theme, icon, title, sub, labels, values, highlight, action) {
+  pills <- lapply(seq_along(labels), function(i) {
+    b <- c("A", "B", "C")[i]
+    div(class = paste("pill", if (b %in% highlight) "hi"), style = paste0("--b:", branch_hex[[b]]),
+        div(class = "pl", labels[i]), div(class = "pv", values[i]))
+  })
+  div(class = paste("insight-card", theme),
+      div(class = "ic-head",
+          div(class = "ic-icon", tags$i(class = paste("bi", icon))),
+          div(div(class = "ic-title", title), div(class = "ic-sub", sub))),
+      div(class = "ic-pills", pills),
+      div(class = "ic-action", tags$i(class = "bi bi-lightning-charge-fill"), HTML(action)))
+}
+branch_peak <- hourly %>% group_by(Branch) %>% slice_max(Revenue, n = 1) %>% ungroup()
+```
+
+## Row {height="14%"}
+
+```{r}
+#| padding: 0
+#| expandable: false
+kpi <- function(icon, label, value, bg) {
+  div(class = "kpi", style = paste0("background:", bg),
+      tags$i(class = paste("bi", icon)),
+      div(div(class = "kl", label), div(class = "kv", value)))
+}
+div(class = "kpi-strip", tags$style(HTML(dashboard_css)),
+    kpi("bi-cash-stack", "Total revenue, Jan to Mar 2019", fmt(sum(sales$Total)), "#1E2A3A"),
+    kpi("bi-receipt", "Transactions", fmt(nrow(sales)), "#2A3D54"),
+    kpi("bi-basket", "Average spend per visit", fmt(mean(sales$Total)), "#36506E"),
+    kpi("bi-star-half", "Average customer rating",
+        paste(format(round(mean(sales$Rating), 2), nsmall = 2), "/ 10"), "#426488"))
+```
+
+## Row {height="86%"}
+
+### Column {width="32%"}
+
+#### Row {height="73%"}
+
+```{r}
+#| title: "Q1: Which branch performs best?"
+metrics <- list(
+  list(col = "Revenue",   name = "Revenue",   lab = fmt(branch_summary$Revenue)),
+  list(col = "Avg_Spend", name = "Avg spend", lab = round(branch_summary$Avg_Spend)),
+  list(col = "Sales",     name = "Sales",     lab = branch_summary$Sales),
+  list(col = "Rating",    name = "Rating",    lab = round(branch_summary$Rating, 2))
+)
+
+p <- plot_ly()
+for (i in seq_along(metrics)) {
+  m <- metrics[[i]]
+  p <- p %>% add_bars(x = branches, y = branch_summary[[m$col]],
+                      marker = list(color = unname(branch_colours)),
+                      text = m$lab, textposition = "outside", cliponaxis = FALSE,
+                      textfont = list(size = 13),
+                      hovertemplate = paste0("%{x}<br>", m$name, ": %{text}<extra></extra>"),
+                      visible = i == 1, width = .6)
+}
+buttons <- lapply(seq_along(metrics), function(i) {
+  vals <- branch_summary[[metrics[[i]]$col]]
+  list(label = metrics[[i]]$name, method = "update",
+       args = list(list(visible = seq_along(metrics) == i),
+                   list(yaxis = list(range = c(0, max(vals) * 1.15), visible = FALSE))))
+})
+
+p %>% style_plot(showlegend = FALSE, updatemenus = button_bar(buttons),
+                 xaxis = list(title = "", tickfont = list(size = 11)),
+                 yaxis = list(range = c(0, max(branch_summary$Revenue) * 1.15), visible = FALSE))
+```
+
+#### Row {height="27%"}
+
+```{r}
+#| padding: 0
+#| expandable: false
+spend <- round(branch_summary$Avg_Spend)
+insight_card("t1", "bi-trophy-fill",
+  paste0("Branch ", best$Branch, " leads: bigger baskets"),
+  paste0("Average spend per visit, revenue gap only ", gap, "%"),
+  labels = branches, values = spend, highlight = best$Branch,
+  action = "<b>Action:</b> test bundles at A, check rating at B")
+```
+
+### Column {width="36%"}
+
+#### Row {height="73%"}
+
+```{r}
+#| title: "Q2: When do customers shop?"
+p <- plot_ly()
+for (b in branches) {
+  d <- hourly %>% filter(Label == b)
+  col <- branch_colours[d$Branch[1]]
+  p <- p %>% add_trace(data = d, x = ~Hour, y = ~Revenue, type = "scatter", mode = "lines+markers",
+                       name = paste("Branch", d$Branch[1]), line = list(width = 2.5, color = col),
+                       marker = list(size = 6, color = col),
+                       hovertemplate = paste0(b, ": %{y:,.0f}<extra></extra>"))
+}
+buttons <- c(list(list(label = "All", method = "restyle", args = list("visible", list(TRUE, TRUE, TRUE)))),
+             lapply(seq_along(branches), function(i)
+               list(label = paste("Only", c("A", "B", "C")[i]), method = "restyle",
+                    args = list("visible", as.list(seq_along(branches) == i)))))
+hours <- seq(10, 20, by = 2)
+
+p %>% style_plot(
+  showlegend = TRUE, hovermode = "x unified", updatemenus = button_bar(buttons),
+  legend = list(orientation = "h", x = 0, xanchor = "left", y = -0.08, yanchor = "top",
+                font = list(size = 11)),
+  margin = list(l = 5, r = 5, t = 40, b = 5),
+  xaxis = list(title = "", tickvals = hours, ticktext = hour_label(hours), gridcolor = "#EEF1F5"),
+  yaxis = list(title = "", tickformat = ".2s", gridcolor = "#E3E8EE"),
+  shapes = lapply(peak$Hour[1:2], function(h)
+    list(type = "rect", xref = "x", yref = "paper", x0 = h - .4, x1 = h + .4, y0 = 0, y1 = 1,
+         fillcolor = "#C8963E", opacity = .15, line = list(width = 0)))
+)
+```
+
+#### Row {height="27%"}
+
+```{r}
+#| padding: 0
+#| expandable: false
+insight_card("t2", "bi-clock-history",
+  paste0("Peaks at ", hour_label(peak$Hour[1]), " and ", hour_label(peak$Hour[2])),
+  "Busiest hour at each branch",
+  labels = branches, values = hour_label(branch_peak$Hour), highlight = c("B", "C"),
+  action = "<b>Action:</b> add staff at each branch's own peak")
+```
+
+### Column {width="32%"}
+
+#### Row {height="73%"}
+
+```{r}
+#| title: "Q3: Which periods are quiet?"
+d_all <- heatmap_data %>% mutate(Weekday = fct_rev(Weekday),
+                                 Period = fct_recode(Period, "Morn" = "Morning", "Mid" = "Midday",
+                                                     "Aft" = "Afternoon", "Eve" = "Evening"))
+zmin <- min(d_all$Per_Hour); zmax <- max(d_all$Per_Hour)
+p <- plot_ly()
+for (i in seq_along(branches)) {
+  d <- d_all %>% filter(Label == branches[i])
+  p <- p %>% add_trace(data = d, x = ~Period, y = ~Weekday, z = ~Per_Hour, type = "heatmap",
+                       colors = c("#F4EEE2", "#C9D6E3", "#5E86AD", "#1E2A3A"),
+                       zmin = zmin, zmax = zmax, xgap = 2, ygap = 2, visible = i == 1,
+                       texttemplate = "%{z}", textfont = list(size = 11), showscale = FALSE,
+                       hovertemplate = "%{y} %{x}<br>Revenue per hour: %{z}<extra></extra>")
+}
+buttons <- lapply(seq_along(branches), function(i)
+  list(label = paste("Branch", c("A", "B", "C")[i]), method = "restyle",
+       args = list("visible", as.list(seq_along(branches) == i))))
+
+p %>% style_plot(updatemenus = button_bar(buttons),
+                 xaxis = list(title = "", tickfont = list(size = 11)),
+                 yaxis = list(title = "", tickfont = list(size = 11)))
+```
+
+#### Row {height="27%"}
+
+```{r}
+#| padding: 0
+#| expandable: false
+insight_card("t3", "bi-tag-fill",
+  "Promote in quiet periods",
+  "Quietest time at each branch (lightest cells)",
+  labels = branches, values = quietest$When, highlight = c("A", "B", "C"),
+  action = "<b>Action:</b> 4-week test; keep it if sales improve")
+```
